@@ -13,11 +13,11 @@ def mock_struct(request):
     return {
         'tables': [
             {
-                'id': '\[TABLE (\d{1,2})\]',
+                'id': ('\[TABLE (\d{1,2})\]', parser.INT),
                 'flows': [
                     {
-                        'id': '\[FLOW_ID(\d+)\]',
-                        'timestamp': 'Timestamp\s+=\s+(.+)'
+                        'id': ('\[FLOW_ID(\d+)\]', parser.INT),
+                        'timestamp': ('Timestamp\s+=\s+(.+)', parser.STRING)
                     }
                 ]
             }
@@ -30,15 +30,15 @@ def mock_group_struct(request):
     return {
         'groups': [
             {
-                'id': 'Group id:\s+(\d+)',
-                'ref_count': 'Reference count:\s+(\d+)',
-                'packet_count': 'Packet count:\s+(\d+)',
-                'byte_count': 'Byte count:\s+(\d+)',
+                'id': ('Group id:\s+(\d+)', parser.INT),
+                'ref_count': ('Reference count:\s+(\d+)', parser.INT),
+                'packet_count': ('Packet count:\s+(\d+)', parser.INT),
+                'byte_count': ('Byte count:\s+(\d+)', parser.INT),
                 'bucket': [
                     {
-                        'id': 'Bucket\s+(\d+)',
-                        'packet_count': 'Packet count:\s+(\d+)',
-                        'byte_count': 'Byte count:\s+(\d+)',
+                        'id': ('Bucket\s+(\d+)', parser.INT),
+                        'packet_count': ('Packet count:\s+(\d+)', parser.INT),
+                        'byte_count': ('Byte count:\s+(\d+)', parser.INT),
                     }
                 ]
             }
@@ -53,7 +53,7 @@ def read(filename):
 
 
 def test_simple_struct():
-    struct = { 'message': '(.*)' }
+    struct = { 'message': ('(.*)', parser.STRING) }
     lines = ["Hello World"]
     expected_output = { 'message': "Hello World" }
     parsed = parser.parse_struct(lines, struct)
@@ -61,13 +61,37 @@ def test_simple_struct():
 
 
 def test_simple_list():
-    struct = { 'count': ['(\d)'] }
+    struct = { 'count': [('(\d)', parser.STRING)] }
+    lines = ["The count says: 1", "The count says: 2", "The count says: 3",
+             "The count says: 4", "The count says: 5"]
+    expected_output = { 'count': ['1','2','3','4','5'] }
+    parsed = parser.parse_struct(lines, struct)
+    assert parsed == expected_output
+
+
+def test_can_parse_to_int():
+    struct = { 'count': [('(\d)', parser.INT)] }
     lines = ["The count says: 1", "The count says: 2", "The count says: 3",
              "The count says: 4", "The count says: 5"]
     expected_output = { 'count': [1,2,3,4,5] }
     parsed = parser.parse_struct(lines, struct)
-    # For now we need to convert to type after parsing
-    parsed = {'count': map(int, parsed['count'])}
+    assert parsed == expected_output
+
+
+def test_can_parse_to_double():
+    struct = { 'count': [('([-+]?[0-9]*\.?[0-9]+)', parser.DOUBLE)] }
+    lines = ["The count says: 1.4", "The count says: 2.7", "The count says: 3",
+             "The count says: -4.1", "The count says: -5"]
+    expected_output = { 'count': [1.4, 2.7, 3.0, -4.1, -5.0] }
+    parsed = parser.parse_struct(lines, struct)
+    assert parsed == expected_output
+
+
+def test_can_parse_to_boolean():
+    struct = { 'true_or_false': [('([Tt]rue|[Ff]alse)', parser.BOOLEAN)] }
+    lines = ["I choose true", "I choose false", "I choose True", "I choose False"]
+    expected_output = { 'true_or_false': [True, False, True, False] }
+    parsed = parser.parse_struct(lines, struct)
     assert parsed == expected_output
 
 
@@ -85,29 +109,43 @@ def test_groups(mock_group_struct):
     assert parsed == expected_output
 
 
-def test_value_not_regex_string_raises_exception():
-    struct = {'message': 123}
+def test_value_not_tuple_raises_exception():
+    struct = {'message': '(.*)'}
+    lines = ["Hello World"]
+    with pytest.raises(TypeError):
+        parser.parse_struct(lines, struct)
+
+
+def test_short_tuple_raises_exception():
+    struct = {'message': ('(.*)',)}
+    lines = ["Hello World"]
+    with pytest.raises(ValueError):
+        parser.parse_struct(lines, struct)
+
+
+def test_not_regex_string_raises_exception():
+    struct = {'message': (123, parser.STRING)}
     lines = ["Hello World"]
     with pytest.raises(TypeError):
         parser.parse_struct(lines, struct)
 
 
 def test_value_without_group_raises_exception():
-    struct = {'message': 'ab'}
+    struct = {'message': ('ab', parser.STRING)}
     lines = ["Hello World"]
     with pytest.raises(ValueError):
         parser.parse_struct(lines, struct)
 
 
 def test_value_with_two_groups_raises_warning():
-    struct = {'message': '(.*)\S+(.*)'}
+    struct = {'message': ('(.*)\S+(.*)', parser.STRING)}
     lines = ["Hello World"]
     with pytest.raises(UserWarning):
         parser.parse_struct(lines, struct)
 
 
 def test_list_with_dict_no_id_raises_exception():
-    struct = {'letter': [{'to': 'Dear\s+(\w+)', 'from': 'Regards,\s+(\w+)'}]}
+    struct = {'letter': [{'to': ('Dear\s+(\w+)', parser.STRING), 'from': ('Regards,\s+(\w+)', parser.STRING)}]}
     letter = "Dear Einstein,\r\n"
     letter += "I am become Death, the destroyer of worlds.\r\n"
     letter += "And it's all your fault!\r\n"
